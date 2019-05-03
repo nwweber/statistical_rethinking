@@ -45,19 +45,17 @@ class Model(object):
         # noinspection PyProtectedMember
         return self.model._repr_latex_()
 
-    def fit(self, X, y):
+    def fit(self, X):
         """
         Fit model to data set. Sets 'trace' property. Sets values of shared variables.
         Modifies model state. Side-effects only. (X, y) interface to be consistent with
         sklearn.
 
         :param X: DataFrame, having a column for each shared variable of this model except for outcome
-        :param y: Series, outcome variable, y.name needs to match name of shared variable of outcome
         :return: None
         """
 
-        X_y = X.assign(**{y.name: y})
-        self._permanently_update_shared_variables(X_y)
+        self._permanently_update_shared_variables(X)
         self.trace = pm.sample(draws=1000, tune=1000, progressbar=False, model=self.model)
 
         return None

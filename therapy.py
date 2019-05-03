@@ -10,6 +10,7 @@ Author: Niklas Weber
 from contextlib import contextmanager
 import pandas as pd
 import pymc3 as pm
+import numpy as np
 
 
 class Model(object):
@@ -44,16 +45,19 @@ class Model(object):
         # noinspection PyProtectedMember
         return self.model._repr_latex_()
 
-    def fit(self, X):
+    def fit(self, X, y):
         """
         Fit model to data set. Sets 'trace' property. Sets values of shared variables.
-        Modifies model state. Side-effects only.
+        Modifies model state. Side-effects only. (X, y) interface to be consistent with
+        sklearn.
 
-        :param X: DataFrame, having a column for each shared variable of this model
+        :param X: DataFrame, having a column for each shared variable of this model except for outcome
+        :param y: Series, outcome variable, y.name needs to match name of shared variable of outcome
         :return: None
         """
 
-        self._permanently_update_shared_variables(X)
+        X_y = X.assign(**{y.name: y})
+        self._permanently_update_shared_variables(X_y)
         self.trace = pm.sample(draws=1000, tune=1000, progressbar=False, model=self.model)
 
         return None
@@ -82,14 +86,15 @@ class Model(object):
         :return: DataFrame, columns = var_1_mean, var_1_hpd_lower, var_1_hpd_upper, ..., rows = observations
         """
 
-        # TODO: wrap below into self-contained function like 'predict_samples()'?
+        # TODO: wrap below into self-contained function like 'predict_ppc_samples()'?
+        # maybe only if i actually repeat this bit of code somewhere
         with self._temporarily_update_shared_variables(X) as _:
-            ppc_samples = pm.trace_to_dataframe(pm.sample_ppc(
+            ppc_samples = pm.sample_ppc(
                 trace=self.trace,
                 model=self.model,
                 vars=vars,
                 progressbar=False
-            ))
+            )
 
         return self.summarize_ppc_samples(ppc_samples)
 
@@ -126,8 +131,37 @@ class Model(object):
         """
         Calculate mean and hpd for each observation x variable.
 
-        :param ppc_samples: DataFrame
+        :param ppc_samples: pymc3 ppc samples ordered dict
         :return: DataFrame, 3 columns per variable (mean, hpd lower, hpd upper), one row per observation
         """
-        raise NotImplementedError()
+        summaries = [
+            self._summarize_one_variable(ppc_samples, variable)
+            for variable in list(ppc_samples.keys())
+        ]
+
+        return pd.concat(summaries, axis=1)
+
+    def _summarize_one_variable(self, ppc_samples, variable):
+        """
+        Provide mean and hpd summaries of given variable.
+
+        :param ppc_samples: pymc3 ppc samples
+        :param variable: key of dict ppc_samples
+        :return: DataFrame, (variable_mean, variable_hpd_lower, variable_hpd_upper), n rows = n columns in ppcs_samples[variable]
+        which should correspond to number of input data points
+        """
+        # row = sample, column = original data point
+        samples = ppc_samples[variable]
+
+        d = dict()
+        d['mean'] = np.mean(samples, axis=0)
+        hpds = pm.hpd(samples, alpha=.3)
+        d['hpd_lower'] = hpds[:, 0]
+        d['hpd_upper'] = hpds[:, 1]
+
+        return (
+            pd
+            .DataFrame(d)
+            .rename(columns=lambda colname: '{}_{}'.format(variable, colname))
+        )
 

@@ -48,10 +48,9 @@ class Model(object):
     def fit(self, X):
         """
         Fit model to data set. Sets 'trace' property. Sets values of shared variables.
-        Modifies model state. Side-effects only. (X, y) interface to be consistent with
-        sklearn.
+        Modifies model state. Side-effects only.
 
-        :param X: DataFrame, having a column for each shared variable of this model except for outcome
+        :param X: DataFrame, having a column for each shared variable of this model
         :return: None
         """
 

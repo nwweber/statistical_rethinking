@@ -21,6 +21,7 @@ class Model(object):
     * model
     * trace
     * shared variables
+    * a name
     """
 
     def __init__(self, model, shared_variables, name):

@@ -13,6 +13,55 @@ import pymc3 as pm
 import numpy as np
 
 
+def compare(models):
+    """
+    Compare models on WAIC (and some other measures)
+
+    In:
+        fitted_models: iterable of fitted Model instances
+
+    Out:
+        DataFrame, indexed by model names, columns having comparison values
+    """
+
+    # variable needs to be Series instead of just list b/c 'pm.compare' returns dataframe which is sorted
+    # by information criterion value. need to match model names to entries of that dataframe by index,
+    # which indicates initial position of the model when given to this function
+    # note: silly design by pymc3
+    model_names = pd.Series([fm.name for fm in models])
+
+    model_dict = {fm.model: fm.trace for fm in models}
+
+    return (
+        pm
+        .compare(
+            model_dict = model_dict,
+            method = 'BB-pseudo-BMA'
+        )
+        .assign(model =  model_names)
+        .set_index('model')
+        .sort_values('WAIC')
+    )
+
+
+def coeftab(models):
+    """
+    For each fitted model: provide MAP estimate of parameters. Display all of them next to each other
+    in tabular format
+    :param models: iterable of fitted Model objects
+    :return: pandas dataframe with summaries
+    """
+    summaries = []
+
+    for m in models:
+        s = pm.summary(trace=m.trace)['mean']
+        # filter out all deterministic values, like 'mu__1', 'mu__2', ...
+        s = s.filter(items=[ix for ix in s.index if '__' not in ix])
+        summaries.append(s)
+
+    return pd.DataFrame(data=summaries, index=[m.name for m in models]).T
+
+
 class Model(object):
     """
     Encapsulate constituent parts of a PyMC3 model and provide useful functionality
@@ -46,17 +95,18 @@ class Model(object):
         # noinspection PyProtectedMember
         return self.model._repr_latex_()
 
-    def fit(self, X):
+    def fit(self, X, **kwargs):
         """
         Fit model to data set. Sets 'trace' property. Sets values of shared variables.
         Modifies model state. Side-effects only.
 
         :param X: DataFrame, having a column for each shared variable of this model
+        :param kwargs: all other keyword args are passed on to the pymc 'sample' function
         :return: None
         """
 
         self._permanently_update_shared_variables(X)
-        self.trace = pm.sample(draws=1000, tune=1000, progressbar=False, model=self.model)
+        self.trace = pm.sample(model=self.model, **kwargs)
 
         return None
 

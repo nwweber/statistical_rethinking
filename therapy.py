@@ -13,6 +13,37 @@ import pymc3 as pm
 import numpy as np
 
 
+def precis(model):
+    """
+    Take a fitted model, give summaries about posterior estimates
+
+    In:
+        fitted_model: instance of Model
+
+    Out:
+        pandas df with posterior summaries
+    """
+
+    summary = pm.summary(model.trace, alpha=.11)
+
+    # filter out deterministic variables
+    # recognized by the '__'  in the name
+    return summary.loc[[ix for ix in summary.index if '__' not in ix]]
+
+
+def coef(m):
+    """
+    Return posterior mean of parameters necessary to compute mu, i.e. the predicted mean
+
+    :param m: fitted Model instance
+    :return: pandas series, index = parameter names, values = parameter values
+    """
+    tdf = pm.trace_to_dataframe(m.trace)
+    # filter for 'a', i.e. intercept, or for 'b.*', i.e. coefficients
+    # together, specify formula for mean
+    return tdf.filter(regex=r'^a$|^b.*', axis=1).mean()
+
+
 def compare(models):
     """
     Compare models on WAIC (and some other measures)

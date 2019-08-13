@@ -13,6 +13,38 @@ import pymc3 as pm
 import numpy as np
 
 
+def sample_mu_ensemble_ppc(models, weights, n_total_samples):
+    """
+    For given models and weights: generate posterior samples of 'mu' variable proportional to given weights.
+    Will skip models with 0 weight.
+    :param models: iterable of Model objects
+    :param weights: iterable of floating point weights
+    :param n_total_samples: int
+    :return: pandas df with posterior mu samples and 'model' column indiciating which model generated this sample
+    """
+    post_sample_dfs = list()
+
+    for model, weight in zip(models, weights):
+        if weight == 0:
+            continue
+
+        samples = pm.sample_ppc(
+            model.trace,
+            samples=int(weight*n_total_samples),
+            model=model.model,
+            vars=[model.model.mu]
+        )['mu']
+
+        df = pd.DataFrame(
+            data=samples,
+            columns=['mu__{}'.format(i) for i in range(samples.shape[1])]
+        ).assign(model=model.name)
+
+        post_sample_dfs.append(df)
+
+    return pd.concat(post_sample_dfs, ignore_index=True)
+
+
 def precis(model):
     """
     Take a fitted model, give summaries about posterior estimates

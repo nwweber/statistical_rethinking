@@ -158,17 +158,20 @@ class Model(object):
         # noinspection PyProtectedMember
         return self.model._repr_latex_()
 
-    def fit(self, X, **kwargs):
+    def fit(self, X=None, **kwargs):
         """
         Fit model to data set. Sets 'trace' property. Sets values of shared variables.
         Modifies model state. Side-effects only.
 
-        :param X: DataFrame, having a column for each shared variable of this model
+        If X is None: don't modify shared variables, fit model to whatever they are currently set to
+
+        :param X: DataFrame, having a column for each shared variable of this model, or None
         :param kwargs: all other keyword args are passed on to the pymc 'sample' function
         :return: None
         """
 
-        self._permanently_update_shared_variables(X)
+        if X is not None:
+            self._permanently_update_shared_variables(X)
         self.trace = pm.sample(model=self.model, **kwargs)
 
         return None

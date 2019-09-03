@@ -11,6 +11,30 @@ from contextlib import contextmanager
 import pandas as pd
 import pymc3 as pm
 import numpy as np
+import theano
+
+
+def create_theano_shared_from_df(df):
+    """
+    For each column in pd df: create theano shared variable, ready to be plugged into pymc3 model
+    :param df:
+    :return: dict, {df_column_name: theano shared variable based on df[df_column_name]}
+    """
+    shared = {}
+    for key in df.columns:
+        shared[key] = theano.shared(df[key].values, name=key)
+
+    return shared
+
+
+def interesting_summary(model):
+    """
+    For Model: generate summary of trace, but filter out auto-generated and deterministic variables, such as 'mu__n'
+    :param model:
+    :return: pd df summary
+    """
+    summary = pm.summary(model.trace)
+    return summary.loc[['__' not in ix for ix in summary.index]]
 
 
 def sample_mu_ensemble_ppc(models, weights, n_total_samples):

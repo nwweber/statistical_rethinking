@@ -149,6 +149,8 @@ def coeftab(models):
     return pd.DataFrame(data=summaries, index=[m.name for m in models]).T
 
 
+# TODO: check out new Data holder and class in pymc3 3.7, incorporate that
+# start here for examples: https://github.com/pymc-devs/pymc3/blob/v3.7/pymc3/model.py#L1064
 class Model(object):
     """
     Encapsulate constituent parts of a PyMC3 model and provide useful functionality
@@ -182,57 +184,83 @@ class Model(object):
         # noinspection PyProtectedMember
         return self.model._repr_latex_()
 
-    def fit(self, X=None, **kwargs):
+    def fit(self, x=None, **kwargs):
         """
         Fit model to data set. Sets 'trace' property. Sets values of shared variables.
         Modifies model state. Side-effects only.
 
-        If X is None: don't modify shared variables, fit model to whatever they are currently set to
+        If x is None: don't modify shared variables, fit model to whatever they are currently set to
 
-        :param X: DataFrame, having a column for each shared variable of this model, or None
+        :param x: DataFrame, having a column for each shared variable of this model, or None
         :param kwargs: all other keyword args are passed on to the pymc 'sample' function
         :return: None
         """
 
-        if X is not None:
-            self._permanently_update_shared_variables(X)
+        if x is not None:
+            self._permanently_update_shared_variables(x)
         self.trace = pm.sample(model=self.model, **kwargs)
 
         return None
 
-    def _permanently_update_shared_variables(self, X):
+    def _permanently_update_shared_variables(self, x):
         """
-        Set shared variables to values in X. Side-effects only.
+        Set shared variables to values in x. Side-effects only. Ignores columns that don't match shared variables.
+        Does nothing for shared variables that don't have a column.
 
-        :param X: DataFrame with a column for each shared variable
+        :param x: DataFrame with none or more column names matching shared variable names
         :return: None
         """
 
+        # nothing to update
+        if x is None:
+            return
+
         for var_name, var in self.shared_variables.items():
-            var.set_value(X[var_name].values)
+            try:
+                var.set_value(x[var_name].values)
+            # key error: trying to access field that does not exist. just want to skip this
+            except KeyError:
+                continue
 
         return None
 
-    def predict(self, X, vars):
+    def sample_posterior_predictive(self, **kwargs):
         """
-        For each data point (row) in X: predict mean and hpd for each variable in vars.
+        Wrapper around pm.sample_posterior_predictive. All arguments will be passed on to this function
+        :param kwargs:
+        :return: pm.sample_posterior_predictive output
+        """
+        return pm.sample_posterior_predictive(
+            trace=self.trace,
+            model=self.model,
+            **kwargs
+        )
 
-        Does not affect internal model state (trace, shared variables).
+    def predict(self, x=None, sample_ppc_kwargs=None):
+        """
+        Does not affect internal model state (trace, shared variables). Shared variables will be
+        temporarily updated with all information available in x before sampling ppc.
 
-        :param vars: iterable of Variable objects from self.model
-        :param X: DataFrame, columns = predictors, rows = observations
-        :return: DataFrame, columns = var_1_mean, var_1_hpd_lower, var_1_hpd_upper, ..., rows = observations
+        For each observed variable in model, return: $varname_samples, $varname_mean, $varname_hpd_lower, $varname_hpd_upper
+
+        If fewer or other variables are desired in output set the 'var_names' key in sample_ppc_kwargs.
+        Ex:
+        sample_ppc_kwargs = {'vars': ['mu']}
+
+        Columns in x that are not shared variables are ignored. Shared variables not in x are not updated, original
+        values are used.
+
+        If x is none ppc samples are drawn for current values of shared variables
+
+        :param sample_ppc_kwargs: dict of args to pass to sample_posterior_predictive
+        :param x: DataFrame, columns = predictors, rows = observations.
+        :return: DataFrame
         """
 
-        # TODO: wrap below into self-contained function like 'predict_ppc_samples()'?
-        # maybe only if i actually repeat this bit of code somewhere
-        with self._temporarily_update_shared_variables(X) as _:
-            ppc_samples = pm.sample_ppc(
-                trace=self.trace,
-                model=self.model,
-                vars=vars,
-                progressbar=False
-            )
+        # needs to be dict for call below
+        sample_ppc_kwargs = sample_ppc_kwargs if sample_ppc_kwargs is not None else dict()
+        with self._temporarily_update_shared_variables(x) as _:
+            ppc_samples = self.sample_posterior_predictive(**sample_ppc_kwargs)
 
         return self.summarize_ppc_samples(ppc_samples)
 
@@ -245,10 +273,10 @@ class Model(object):
         return pd.DataFrame({var_name: var.get_value() for var_name, var in self.shared_variables.items()})
 
     @contextmanager
-    def _temporarily_update_shared_variables(self, X):
+    def _temporarily_update_shared_variables(self, x):
         """
         Change shared variables, then change them back. To be used as context manager
-        :param X: DataFrame, column name = shared variable name
+        :param x: DataFrame, column name = shared variable name
         :return: dummy object
         """
         # record original data and change
@@ -256,7 +284,7 @@ class Model(object):
 
         try:
             # update
-            self._permanently_update_shared_variables(X)
+            self._permanently_update_shared_variables(x)
             # context created here
             yield None
         except Exception as e:
@@ -279,7 +307,8 @@ class Model(object):
 
         return pd.concat(summaries, axis=1)
 
-    def _summarize_one_variable(self, ppc_samples, variable):
+    @staticmethod
+    def _summarize_one_variable(ppc_samples, variable):
         """
         Provide mean and hpd summaries of given variable.
 
@@ -289,17 +318,19 @@ class Model(object):
         which should correspond to number of input data points
         """
         # row = sample, column = original data point
-        samples = ppc_samples[variable]
+        sample_array = ppc_samples[variable]
+        hpds = pm.hpd(sample_array, alpha=.3)
 
         d = dict()
-        d['mean'] = np.mean(samples, axis=0)
-        hpds = pm.hpd(samples, alpha=.3)
-        d['hpd_lower'] = hpds[:, 0]
-        d['hpd_upper'] = hpds[:, 1]
+        # collect all samples into one field per input row
+        # more elegant way?
+        d[f'{variable}_samples'] = list(sample_array.T)
+        d[f'{variable}_hpd_lower'] = hpds[:, 0]
+        d[f'{variable}_hpd_upper'] = hpds[:, 1]
+        d[f'{variable}_mean'] = np.mean(sample_array, axis=0)
 
         return (
             pd
             .DataFrame(d)
-            .rename(columns=lambda colname: '{}_{}'.format(variable, colname))
         )
 

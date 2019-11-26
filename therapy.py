@@ -245,7 +245,7 @@ class Model(object):
 
         If fewer or other variables are desired in output set the 'var_names' key in sample_ppc_kwargs.
         Ex:
-        sample_ppc_kwargs = {'vars': ['mu']}
+        sample_ppc_kwargs = {'var_names': ['mu']}
 
         Columns in x that are not shared variables are ignored. Shared variables not in x are not updated, original
         values are used.
@@ -257,9 +257,9 @@ class Model(object):
         :return: DataFrame
         """
 
-        # needs to be dict for call below
-        sample_ppc_kwargs = sample_ppc_kwargs if sample_ppc_kwargs is not None else dict()
         with self._temporarily_update_shared_variables(x) as _:
+            # needs to be dict for call below
+            sample_ppc_kwargs = sample_ppc_kwargs if sample_ppc_kwargs is not None else dict()
             ppc_samples = self.sample_posterior_predictive(**sample_ppc_kwargs)
 
         return self.summarize_ppc_samples(ppc_samples)

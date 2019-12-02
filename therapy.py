@@ -118,16 +118,14 @@ def compare(models):
     model_names = pd.Series([fm.name for fm in models])
 
     model_dict = {fm.model: fm.trace for fm in models}
-
     return (
         pm
         .compare(
-            model_dict = model_dict,
-            method = 'BB-pseudo-BMA'
+            model_dict=model_dict,
+            method='BB-pseudo-BMA'
         )
-        .assign(model =  model_names)
+        .assign(model= model_names)
         .set_index('model')
-        .sort_values('WAIC')
     )
 
 
